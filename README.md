@@ -120,7 +120,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 👥 Authors
 
-[Add author information here]
+Nirajan KC, Ranjan Thakur
 
 ## 🙏 Acknowledgments
 
