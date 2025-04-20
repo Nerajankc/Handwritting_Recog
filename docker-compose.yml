@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Flask API service
+  # ocr-api:
+  #   build: 
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: ocr-api
+  #   command: python server.py
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./uploads:/app/uploads
+  #     - ./outputs:/app/outputs
+  #   ports:
+  #     - "5000:5000"
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #   restart: unless-stopped
+
+  # Streamlit app service
+  ocr-streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ocr-streamlit
+    command: streamlit run src/app.py --server.port=8501 --server.address=0.0.0.0
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+    ports:
+      - "8502:8501"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    depends_on:
+      - ocr-api 
