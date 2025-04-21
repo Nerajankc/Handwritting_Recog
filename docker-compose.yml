@@ -36,3 +36,5 @@ services:
     restart: unless-stopped
     depends_on:
       - ocr-api 
+
+      
