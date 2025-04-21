@@ -1,20 +1,24 @@
-import sys
-import os
+#!/usr/bin/env python3
+"""
+Handwriting Segmentation Tool
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+This script processes handwritten text images and segments them into individual words.
+It saves the segmented words as separate image files and creates a sequence file
+containing the order of the words.
+"""
 
-
-from PIL import Image as im
-import numpy as np
-from segmentor import detect, prepare_img, sort_multiline
-from path import Path
-import cv2
-from typing import List
 import argparse
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import List, Tuple, Optional
 
+import cv2
 
-list_img_names_serial = []
-
+# Add parent directory to Python path for module imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from segmentor import HandwritingSegmentor
 
 def retrieve_image_files(data_dir: Path) -> List[Path]:
     """Retrieve all image files from a specified directory.
@@ -31,78 +35,211 @@ def retrieve_image_files(data_dir: Path) -> List[Path]:
     return res
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--data', type=Path, default=Path('../data/page'))
-parser.add_argument('--kernel_size', type=int, default=25)
-parser.add_argument('--sigma', type=float, default=11)
-parser.add_argument('--theta', type=float, default=7)
-parser.add_argument('--min_area', type=int, default=100)
-parser.add_argument('--img_height', type=int, default=1000)
-parsed = parser.parse_args()
+class HandwritingProcessor:
+    """Handles the processing of handwritten text images and saving of results."""
+    
+    def __init__(self, output_dir: str = "../output"):
+        """
+        Initialize the processor with output directory.
+        
+        Args:
+            output_dir: Directory where segmented words will be saved
+        """
+        self.output_dir = Path(output_dir)
+        self.segmentor = HandwritingSegmentor()
+        self._setup_logging()
+        
+    def _setup_logging(self):
+        """Configure logging for the processor."""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        self.logger = logging.getLogger(__name__)
+        
+    def _ensure_output_directory(self) -> None:
+        """Create output directory if it doesn't exist."""
+        if not self.output_dir.exists():
+            self.output_dir.mkdir(parents=True)
+            self.logger.info(f"Created output directory: {self.output_dir}")
+            
+    def process_image(self, 
+                     image_path: str,
+                     target_height: int = 1000,
+                     kernel_size: int = 25,
+                     sigma: float = 11.0,
+                     aspect_ratio: float = 7.0,
+                     min_area: int = 100) -> Tuple[List[str], int]:
+        """
+        Process a single handwritten text image.
+        
+        Args:
+            image_path: Path to the input image
+            target_height: Height to resize the image to
+            kernel_size: Size of the kernel for word detection
+            sigma: Sigma value for Gaussian filter
+            aspect_ratio: Expected width/height ratio of words
+            min_area: Minimum area for word candidates
+            
+        Returns:
+            Tuple containing:
+                - List of paths to saved word images
+                - Number of words detected
+        """
+        self._ensure_output_directory()
+        
+        # Read and preprocess image
+        self.logger.info(f"Processing image: {image_path}")
+        image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError(f"Failed to read image: {image_path}")
+            
+        processed_image = self.segmentor.preprocess_image(image, target_height)
+        
+        # Detect and arrange words
+        words = self.segmentor.detect_words(
+            processed_image,
+            kernel_size=kernel_size,
+            sigma=sigma,
+            aspect_ratio=aspect_ratio,
+            min_area=min_area
+        )
+        
+        lines = self.segmentor.arrange_words(words)
+        
+        # Save individual word images
+        saved_paths = []
+        sequence = []
+        
+        for line_idx, line in enumerate(lines):
+            for word_idx, word in enumerate(line):
+                filename = f"line{line_idx:03d}_word{word_idx:03d}.jpg"
+                filepath = self.output_dir / filename
+                
+                cv2.imwrite(str(filepath), word.image)
+                saved_paths.append(str(filepath))
+                sequence.append(filename)
+                
+        # Save sequence file
+        sequence_file = self.output_dir / "word_sequence.txt"
+        with open(sequence_file, "w") as f:
+            f.write("\n".join(sequence))
+            
+        self.logger.info(f"Processed {len(saved_paths)} words")
+        return saved_paths, len(saved_paths)
 
-print("File path: ", parsed.data)
-def save_image_names_to_text_files(input_image, output_dir=None):
+
+def get_image_files(directory: str) -> List[Path]:
     """
-    Process an input image, segment it into words, and save crops to the specified directory.
+    Get all image files from a directory.
     
     Args:
-        input_image: Path to the input image file
-        output_dir: Directory to save cropped images (default: "../test_images")
+        directory: Directory to search for images
         
     Returns:
-        tuple: (output_directory, list of saved image paths)
+        List of paths to image files
     """
-    # Set default output directory if not provided
-    if output_dir is None:
-        output_dir = "../test_images"
+    image_extensions = {'.png', '.jpg', '.jpeg', '.bmp'}
+    directory_path = Path(directory)
     
-    # Clear the list if we're starting fresh
-    list_img_names_serial.clear()
+    return [
+        f for f in directory_path.iterdir()
+        if f.is_file() and f.suffix.lower() in image_extensions
+    ]
+
+
+def main():
+    """Main entry point for the script."""
+    parser = argparse.ArgumentParser(
+        description="Segment handwritten text into individual words"
+    )
+    parser.add_argument(
+        '--input',
+        type=str,
+        default='../data/page',
+        help='Input directory containing images or path to single image'
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='../output',
+        help='Output directory for segmented words'
+    )
+    parser.add_argument(
+        '--height',
+        type=int,
+        default=1000,
+        help='Target height for image preprocessing'
+    )
+    parser.add_argument(
+        '--kernel-size',
+        type=int,
+        default=25,
+        help='Size of the filter kernel (odd integer)'
+    )
+    parser.add_argument(
+        '--sigma',
+        type=float,
+        default=11.0,
+        help='Standard deviation for Gaussian filter'
+    )
+    parser.add_argument(
+        '--aspect-ratio',
+        type=float,
+        default=7.0,
+        help='Expected width/height ratio of words'
+    )
+    parser.add_argument(
+        '--min-area',
+        type=int,
+        default=100,
+        help='Minimum area for word candidates'
+    )
     
-    # Create output directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        print(f"Directory Created: {output_dir}")
-
-    img = prepare_img(cv2.imread(input_image), parsed.img_height)
-    detections = detect(img,
-                        kernel_size=parsed.kernel_size,
-                        sigma=parsed.sigma,
-                        theta=parsed.theta,
-                        min_area=parsed.min_area)
-
-    lines = sort_multiline(detections)
-    saved_image_paths = []
+    args = parser.parse_args()
     
-    for line_idx, line in enumerate(lines):
-        for word_idx, det in enumerate(line):
-            xs = [det.bbox.x, det.bbox.x, det.bbox.x +
-                  det.bbox.w, det.bbox.x + det.bbox.w, det.bbox.x]
-            ys = [det.bbox.y, det.bbox.y + det.bbox.h,
-                  det.bbox.y + det.bbox.h, det.bbox.y, det.bbox.y]
-            print(det.bbox.x, det.bbox.y, det.bbox.w, det.bbox.h)
-            crop_img = img[det.bbox.y:det.bbox.y +
-                          det.bbox.h, det.bbox.x:det.bbox.x+det.bbox.w]
-
-            filename = f"line{line_idx}word{word_idx}.jpg"
-            file_path = os.path.join(output_dir, filename)
+    try:
+        processor = HandwritingProcessor(args.output)
+        input_path = Path(args.input)
+        
+        if input_path.is_file():
+            # Process single image
+            saved_paths, word_count = processor.process_image(
+                str(input_path),
+                args.height,
+                args.kernel_size,
+                args.sigma,
+                args.aspect_ratio,
+                args.min_area
+            )
+            print(f"Processed 1 image, found {word_count} words")
             
-            cv2.imwrite(file_path, crop_img)
-            saved_image_paths.append(file_path)
+        elif input_path.is_dir():
+            # Process all images in directory
+            image_files = get_image_files(input_path)
+            total_words = 0
             
-            list_img_names_serial.append(filename)
-            print(list_img_names_serial)
+            for image_file in image_files:
+                _, word_count = processor.process_image(
+                    str(image_file),
+                    args.height,
+                    args.kernel_size,
+                    args.sigma,
+                    args.aspect_ratio,
+                    args.min_area
+                )
+                total_words += word_count
+                
+            print(f"Processed {len(image_files)} images, found {total_words} words")
+            
+        else:
+            print(f"Error: Input path {args.input} does not exist")
+            sys.exit(1)
+            
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
 
-    # Save the list of filenames to a text file in the output directory
-    textfile_path = os.path.join(output_dir, "img_names_sequence.txt")
-    with open(textfile_path, "w") as textfile:
-        for element in list_img_names_serial:
-            textfile.write(element + "\n")
-    
-    return output_dir, saved_image_paths
 
 if __name__ == "__main__":
-    test_image = "../data/page/input.png"
-    output_dir, image_paths = save_image_names_to_text_files(test_image)
-    print(f"Images saved to: {output_dir}")
-    print(f"Generated {len(image_paths)} images")
+    main()
