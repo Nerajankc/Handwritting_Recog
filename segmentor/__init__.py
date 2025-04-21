@@ -21,12 +21,12 @@ class DetectorRes:
     bbox: BBox
 
 
-def detect(img: np.ndarray,
-           kernel_size: int,
-           sigma: float,
-           theta: float,
-           min_area: int) -> List[DetectorRes]:
-    """Scale space technique for word segmentation
+def segment_words_in_image(img: np.ndarray,
+                           kernel_size: int,
+                           sigma: float,
+                           theta: float,
+                           min_area: int) -> List[DetectorRes]:
+    """Segment words in a grayscale image using a scale-space technique.
 
     Args:
         img: A grayscale uint8 image.
@@ -42,7 +42,7 @@ def detect(img: np.ndarray,
     assert img.dtype == np.uint8
 
     # apply filter kernel
-    kernel = _compute_kernel(kernel_size, sigma, theta)
+    kernel = compute_anisotropic_filter_kernel(kernel_size, sigma, theta)
     img_filtered = cv2.filter2D(img, -1, kernel, borderType=cv2.BORDER_REPLICATE).astype(np.uint8)
     img_thres = 255 - cv2.threshold(img_filtered, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
 
@@ -62,10 +62,19 @@ def detect(img: np.ndarray,
     return res
 
 
-def _compute_kernel(kernel_size: int,
-                    sigma: float,
-                    theta: float) -> np.ndarray:
-    """Compute anisotropic filter kernel."""
+def compute_anisotropic_filter_kernel(kernel_size: int,
+                                       sigma: float,
+                                       theta: float) -> np.ndarray:
+    """Compute an anisotropic filter kernel for image processing.
+
+    Args:
+        kernel_size: Size of the kernel, must be odd.
+        sigma: Standard deviation for the Gaussian function.
+        theta: Ratio of width to height for the filter.
+
+    Returns:
+        Anisotropic filter kernel as a numpy array.
+    """
 
     assert kernel_size % 2  # must be odd size
 
@@ -89,22 +98,39 @@ def _compute_kernel(kernel_size: int,
     return kernel
 
 
-def prepare_img(img: np.ndarray,
-                height: int) -> np.ndarray:
-    """Convert image to grayscale image (if needed) and resize to given height."""
-    assert img.ndim in (2, 3)
-    assert height > 0
-    assert img.dtype == np.uint8
+def convert_and_resize_image(img: np.ndarray, height: int) -> np.ndarray:
+    """Convert image to grayscale and resize to the specified height.
+
+    Args:
+        img: Input image as a numpy array, can be grayscale or color.
+        height: Desired height to resize the image to.
+
+    Returns:
+        Resized grayscale image as a numpy array.
+    """
+    assert img.ndim in (2, 3), "Image must be 2D (grayscale) or 3D (color)."
+    assert height > 0, "Height must be a positive integer."
+    assert img.dtype == np.uint8, "Image dtype must be uint8."
     if img.ndim == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # Convert to grayscale if image is color
     h = img.shape[0]
     factor = height / h
     return cv2.resize(img, dsize=None, fx=factor, fy=factor)
 
 
-def _cluster_lines(detections: List[DetectorRes],
-                   max_dist: float = 0.7,
-                   min_words_per_line: int = 2) -> List[List[DetectorRes]]:
+def cluster_detections_into_lines(detections: List[DetectorRes],
+                                   max_dist: float = 0.7,
+                                   min_words_per_line: int = 2) -> List[List[DetectorRes]]:
+    """Cluster word detections into lines based on Jaccard distance.
+
+    Args:
+        detections: List of word detections.
+        max_dist: Maximum Jaccard distance for clustering.
+        min_words_per_line: Minimum number of words per line to be considered valid.
+
+    Returns:
+        List of clustered lines, each containing word detections.
+    """
     # compute matrix containing Jaccard distances (which is a proper metric)
     num_bboxes = len(detections)
     dist_mat = np.ones((num_bboxes, num_bboxes))
@@ -131,26 +157,33 @@ def _cluster_lines(detections: List[DetectorRes],
     return res
 
 
-def sort_multiline(detections: List[DetectorRes],
-                   max_dist: float = 0.7,
-                   min_words_per_line: int = 2) -> List[List[DetectorRes]]:
-    """Cluster detections into lines, then sort the lines according to x-coordinates of word centers.
+def sort_detections_into_multiline(detections: List[DetectorRes],
+                                    max_dist: float = 0.7,
+                                    min_words_per_line: int = 2) -> List[List[DetectorRes]]:
+    """Sort detections into multiple lines based on their x-coordinates.
 
     Args:
         detections: List of detections.
-        max_dist: Maximum Jaccard distance (0..1) between two y-projected words to be considered as neighbors.
-        min_words_per_line: If a line contains less words than specified, it is ignored.
+        max_dist: Maximum Jaccard distance for clustering.
+        min_words_per_line: Minimum number of words per line to be considered valid.
 
     Returns:
-        List of lines, each line itself a list of detections.
+        List of sorted lines, each line itself a list of detections.
     """
-    lines = _cluster_lines(detections, max_dist, min_words_per_line)
+    lines = cluster_detections_into_lines(detections, max_dist, min_words_per_line)
     res = []
     for line in lines:
-        res += sort_line(line)
+        res += sort_detections_by_x_coordinate(line)
     return res
 
 
-def sort_line(detections: List[DetectorRes]) -> List[List[DetectorRes]]:
-    """Sort the list of detections according to x-coordinates of word centers."""
+def sort_detections_by_x_coordinate(detections: List[DetectorRes]) -> List[List[DetectorRes]]:
+    """Sort detections by the x-coordinate of their bounding box centers.
+
+    Args:
+        detections: List of word detections.
+
+    Returns:
+        List of detections sorted by x-coordinate.
+    """
     return [sorted(detections, key=lambda det: det.bbox.x + det.bbox.w / 2)]
