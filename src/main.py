@@ -16,10 +16,17 @@ import argparse
 list_img_names_serial = []
 
 
-def get_img_files(data_dir: Path) -> List[Path]:
-    """Return all image files contained in a folder."""
+def retrieve_image_files(data_dir: Path) -> List[Path]:
+    """Retrieve all image files from a specified directory.
+
+    Args:
+        data_dir: Path to the directory containing image files.
+
+    Returns:
+        A list of Paths to the image files found in the directory.
+    """
     res = []
-    for ext in ['*.png', '*.jpg','*.jpeg', '*.bmp']:
+    for ext in ['*.png', '*.jpg', '*.jpeg', '*.bmp']:
         res += Path(data_dir).files(ext)
     return res
 
