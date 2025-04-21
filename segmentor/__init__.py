@@ -22,10 +22,10 @@ class DetectorRes:
 
 
 def segment_words_in_image(img: np.ndarray,
-                           kernel_size: int,
-                           sigma: float,
-                           theta: float,
-                           min_area: int) -> List[DetectorRes]:
+                        kernel_size: int,
+                        sigma: float,
+                        theta: float,
+                        min_area: int) -> List[DetectorRes]:
     """Segment words in a grayscale image using a scale-space technique.
 
     Args:
