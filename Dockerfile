@@ -32,3 +32,4 @@ ENV PYTHONUNBUFFERED=1
 
 # Command to run the application (can be overridden in docker-compose)
 CMD ["python", "server.py"] 
+

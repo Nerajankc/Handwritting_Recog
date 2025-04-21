@@ -20,6 +20,20 @@ import cv2
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from segmentor import HandwritingSegmentor
 
+def retrieve_image_files(data_dir: Path) -> List[Path]:
+    """Retrieve all image files from a specified directory.
+
+    Args:
+        data_dir: Path to the directory containing image files.
+
+    Returns:
+        A list of Paths to the image files found in the directory.
+    """
+    res = []
+    for ext in ['*.png', '*.jpg', '*.jpeg', '*.bmp']:
+        res += Path(data_dir).files(ext)
+    return res
+
 
 class HandwritingProcessor:
     """Handles the processing of handwritten text images and saving of results."""

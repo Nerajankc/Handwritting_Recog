@@ -28,7 +28,16 @@ char_to_num = StringLookup(vocabulary=b, mask_token=None)
 num_to_chars = StringLookup(vocabulary=char_to_num.get_vocabulary(), mask_token=None, invert=True)
 
 # New function to run inference on a single image path and return results
-def run_inference_on_image(image_path):
+def perform_inference_on_image(image_path):
+    """Perform inference on a single image and return the results.
+    Args:
+        image_path: Path to the input image file.
+    Returns:
+        A dictionary containing:
+            - 'prediction': List of predicted text segments from the image.
+            - 'formatted_text': The predicted text formatted to fit within 80 characters per line.
+            - 'output_directory': Path to the directory where segmented images are saved.
+    """
     # Create a unique output directory for this inference
     output_dir = os.path.join("../outputs", str(uuid.uuid4()))
     
@@ -70,39 +79,48 @@ def run_inference_on_image(image_path):
     
     return result
 
-def distortion_free_resize(image, img_size):
-  w, h = img_size
-  image = tf.image.resize(image, size=(h, w), preserve_aspect_ratio=True)
+def resize_image_preserving_aspect_ratio(image, img_size):
+    """Resize an image while preserving its aspect ratio.
 
-  # Check tha amount of padding needed to be done.
-  pad_height = h - tf.shape(image)[0]
-  pad_width = w - tf.shape(image)[1]
+    Args:
+        image: Input image as a tensor.
+        img_size: Desired size as a tuple (width, height).
 
-  # only necessary if you want to do same amount of padding on both sides.
-  if pad_height % 2 != 0:
-    height = pad_height // 2
-    pad_height_top = height +1
-    pad_height_bottom = height
-  else:
-    pad_height_top = pad_height_bottom = pad_height // 2
+    Returns:
+        Resized image with preserved aspect ratio.
+    """
+    w, h = img_size
+    image = tf.image.resize(image, size=(h, w), preserve_aspect_ratio=True)
 
-  if pad_width % 2 != 0:
-    width = pad_width // 2
-    pad_width_left = width + 1
-    pad_width_right = width
-  else:
-    pad_width_left = pad_width_right = pad_width // 2
+    # Check the amount of padding needed to be done.
+    pad_height = h - tf.shape(image)[0]
+    pad_width = w - tf.shape(image)[1]
 
-  image = tf.pad(
-      image, paddings=[
-          [pad_height_top, pad_height_bottom],
-          [pad_width_left, pad_width_right],
-          [0, 0],
-      ],
-  )
-  image = tf.transpose(image, perm=[1,0,2])
-  image = tf.image.flip_left_right(image)
-  return image
+    # only necessary if you want to do same amount of padding on both sides.
+    if pad_height % 2 != 0:
+        height = pad_height // 2
+        pad_height_top = height + 1
+        pad_height_bottom = height
+    else:
+        pad_height_top = pad_height_bottom = pad_height // 2
+
+    if pad_width % 2 != 0:
+        width = pad_width // 2
+        pad_width_left = width + 1
+        pad_width_right = width
+    else:
+        pad_width_left = pad_width_right = pad_width // 2
+
+    image = tf.pad(
+        image, paddings=[
+            [pad_height_top, pad_height_bottom],
+            [pad_width_left, pad_width_right],
+            [0, 0],
+        ],
+    )
+    image = tf.transpose(image, perm=[1, 0, 2])
+    image = tf.image.flip_left_right(image)
+    return image
 
 # Testing inference images
 batch_size = 64
@@ -112,24 +130,47 @@ image_height = 32
 
 
 def preprocess_image(image_path, img_size=(image_width, image_height)):
-  image = tf.io.read_file(image_path)
-  image = tf.image.decode_png(image, 1)
-  image = distortion_free_resize(image, img_size)
-  image = tf.cast(image, tf.float32) / 255.0
-  return image
+    """Preprocess an image for inference by resizing and normalizing.
 
-def process_images_2(image_path):
-  image = preprocess_image(image_path)
-  # label = vectorize_label(label)
-  return {"image": image}
-  
+    Args:
+        image_path: Path to the image file.
+        img_size: Desired size for the image.
+
+    Returns:
+        Preprocessed image as a tensor.
+    """
+    image = tf.io.read_file(image_path)
+    image = tf.image.decode_png(image, 1)
+    image = resize_image_preserving_aspect_ratio(image, img_size)
+    image = tf.cast(image, tf.float32) / 255.0
+    return image
+
+def process_single_image_for_inference(image_path):
+    """Process a single image for inference.
+
+    Args:
+        image_path: Path to the image file.
+
+    Returns:
+        A dictionary with the preprocessed image.
+    """
+    image = preprocess_image(image_path)
+    return {"image": image}
+
 def prepare_test_images(image_paths):
-  dataset = tf.data.Dataset.from_tensor_slices((image_paths)).map(
-    process_images_2, num_parallel_calls=AUTOTUNE
-  )
+    """Prepare a dataset of images for inference.
 
-  # return dataset
-  return dataset.batch(batch_size).cache().prefetch(AUTOTUNE)
+    Args:
+        image_paths: List of paths to image files.
+
+    Returns:
+        A batched and prefetched dataset of images ready for inference.
+    """
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths)).map(
+        process_single_image_for_inference, num_parallel_calls=AUTOTUNE
+    )
+
+    return dataset.batch(batch_size).cache().prefetch(AUTOTUNE)
 
 
 class CTCLayer(keras.layers.Layer):
@@ -158,6 +199,14 @@ prediction_model = keras.models.Model(reconstructed_model.get_layer(name="image"
 pred_test_text = []
 
 def decode_batch_predictions(pred):
+    """Decode predictions from a batch of images.
+
+    Args:
+        pred: Predictions from the model.
+
+    Returns:
+        A list of decoded text strings from the predictions.
+    """
     input_len = np.ones(pred.shape[0]) * pred.shape[1]
     results = keras.backend.ctc_decode(pred, input_length=input_len, greedy=True)[0][0][
         :, :max_len
@@ -166,9 +215,9 @@ def decode_batch_predictions(pred):
     output_text = []
 
     for res in results:
-      res = tf.gather(res, tf.where(tf.math.not_equal(res, -1)))
-      res = tf.strings.reduce_join(num_to_chars(res)).numpy().decode("utf-8")
-      output_text.append(res)
+        res = tf.gather(res, tf.where(tf.math.not_equal(res, -1)))
+        res = tf.strings.reduce_join(num_to_chars(res)).numpy().decode("utf-8")
+        output_text.append(res)
 
     return output_text
 
